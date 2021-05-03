@@ -58,28 +58,9 @@ df$deathDate <- parseYear19(df$doddt)
 df$emigrationDate <- parseYear19(df$emigdt)
 df$diagnosisDate <- parseYear19(df$diagdat)
 
-# follow up time 
-find_follow_up_time_days <- function(dataframe){
-  endOfFollowUp <-  pmin(as.Date("2018-12-31"), 
-                         dataframe$deathDate,
-                         dataframe$emigrationDate,
-                         dataframe$diagnosisDate,
-                         na.rm = TRUE)
-  
-  mutate(dataframe, followUpTimeDays = endOfFollowUp - q2.date)
-}
 
 
-df <- find_follow_up_time_days(df)
 
-# age exit
-find_age_exit <- function(dataframe){
-  dataframe %>%
-    mutate(ageExit = as.numeric(q2.age + followUpTimeDays/365.25))
-  
-}
-
-df <- find_age_exit(df)
 
 
 # merge year of birth into one column, assume 1st July birthday, date format
@@ -122,6 +103,29 @@ df$q2.date <- as.Date(df$q2.date, "%d%m%Y")
 # find age at Q1 and Q2
 df$q1.age <- (df$q1.date - df$dateBirth)/365.25
 df$q2.age <- (df$q2.date - df$dateBirth)/365.25
+
+# follow up time 
+find_follow_up_time_days <- function(dataframe){
+  endOfFollowUp <-  pmin(as.Date("2018-12-31"), 
+                         dataframe$deathDate,
+                         dataframe$emigrationDate,
+                         dataframe$diagnosisDate,
+                         na.rm = TRUE)
+  
+  mutate(dataframe, followUpTimeDays = endOfFollowUp - q2.date)
+}
+
+
+df <- find_follow_up_time_days(df)
+
+# age exit
+find_age_exit <- function(dataframe){
+  dataframe %>%
+    mutate(ageExit = as.numeric(q2.age + followUpTimeDays/365.25))
+  
+}
+
+df <- find_age_exit(df)
 
 
 # bmi ----
