@@ -22,7 +22,7 @@ library(lubridate)
 
 
 # load data
-df <- read.csv("C:/Users/sch044/OneDrive - UiT Office 365/R/delta_hli/data/23042021.csv")
+df <- read.csv("C:/Users/sch044/OneDrive - UiT Office 365/R/delta_hli/data/09052021.csv")
 
 # convert all colnames to lowercase
 colnames(df) <- tolower(colnames(df))
@@ -33,42 +33,13 @@ df <- df[!is.na(df$yserienr),]
 # create ID variable
 df$id <- 1:nrow(df)
 
-# Create function to parse 1900 and 2000 at year "19"
 
-parseYear19 <- function(dateAsInteger){
-  sixDigitInteger <- sprintf("%06d", dateAsInteger) #left-pad with zeros if less than 6 digits
-  dateAsDate <- as.Date(as.character(sixDigitInteger), "%d%m%y")
-  a <- year(dateAsDate) %% 100
-  b <- ifelse(
-    a > 19, 
-    1900 + a, 
-    2000 + a)
-  monthFromDate <- sprintf("%02d", month(dateAsDate))
-  dayFromDate <- day(dateAsDate)
-  return(as.Date(
-    paste(b, 
-          monthFromDate, 
-          dayFromDate,
-          sep = ""),
-    "%Y%m%d")
-  )
-}
+# format dates
 
-df$deathDate <- parseYear19(df$doddt)
-df$emigrationDate <- parseYear19(df$emigdt)
-df$diagnosisDate <- parseYear19(df$diagdat)
-
-
-
-
-
-
-# merge year of birth into one column, assume 1st July birthday, date format
-df$dateBirth <- as.Date(paste0("010719",
-                              ifelse(!is.na(df$faar),
-                                    df$faar,
-                                    df$q1.faar)),
-                        "%d%m%Y")
+df$dateDeath <- as.Date(df$doddt, format= "%d/%m/%Y")
+df$dateEmigration <- as.Date(df$emigdt, format = "%d/%m/%Y")
+df$dateDiagnosis <- as.Date(df$diagdat, format = "%d/%m/%Y")
+df$dateBirth <- as.Date(paste0("010719", df$faar),"%d%m%Y")
 
 # find date of q1
 df <- df %>%
@@ -107,9 +78,9 @@ df$q2.age <- (df$q2.date - df$dateBirth)/365.25
 # follow up time 
 find_follow_up_time_days <- function(dataframe){
   endOfFollowUp <-  pmin(as.Date("2018-12-31"), 
-                         dataframe$deathDate,
-                         dataframe$emigrationDate,
-                         dataframe$diagnosisDate,
+                         dataframe$dateDeath,
+                         dataframe$dateEmigration,
+                         dataframe$dateDiagnosis,
                          na.rm = TRUE)
   
   mutate(dataframe, followUpTimeDays = endOfFollowUp - q2.date)
@@ -117,6 +88,15 @@ find_follow_up_time_days <- function(dataframe){
 
 
 df <- find_follow_up_time_days(df)
+
+# find how many people died and emigrated before follow up
+
+table(df$dateDeath < df$q2.date)
+table(df$dateEmigration < df$q2.date)
+table(df$dateDiagnosis < df$q2.date)
+
+# exclude prevalent cancers, death, emigration before start of follow-up
+df <- df[df$followUpTimeDays>=0, ]
 
 # age exit
 find_age_exit <- function(dataframe){
@@ -126,6 +106,11 @@ find_age_exit <- function(dataframe){
 }
 
 df <- find_age_exit(df)
+
+
+
+
+
 
 
 # bmi ----
@@ -240,19 +225,33 @@ df <- years_since_smoking_cessation_q2(df)
 
 # alcohol ----
 
-      # do not have variables for this yet
-calculateGrAlcohol <- function(dataframe, name_of_resulting_variable){
-  return(
-    dataframe %>%
-      mutate(name_of_resulting_variable = case_when(
-        avhold == 1 & #Missing on alcohol if declared not sober and have not filled in frequency questions
-          is.na(casesIncluded$OLGLASS) &
-          is.na(casesIncluded$VINGLASS) &
-          is.na(casesIncluded$DRINKER) ~ NA_real_,
-        TRUE ~ ALKOGR
+
+calculateGrAlcoholQ1 <- function(dataframe){
+  return(dataframe %>%
+           mutate(q1.gramsAlcohol = case_when(
+            avhold == 1 & # avhold=1 is "not sober"
+            is.na(dataframe$olglass) &
+            is.na(dataframe$vinglass) &
+            is.na(dataframe$drinker) ~ NA_real_,#Missing on alcohol if declared not sober and have not filled in frequency questions
+            TRUE ~ alkogr
       )))
 }  
 
+df <- calculateGrAlcoholQ1(df)
+
+
+calculateGrAlcoholQ2 <- function(dataframe){
+  return(dataframe %>%
+           mutate(q2.gramsAlcohol = case_when(
+             avhold == 1 & # avhold=1 is "not sober"
+               is.na(dataframe$yolglass) &
+               is.na(dataframe$yvinglass) &
+               is.na(dataframe$ydrinker) ~ NA_real_,#Missing on alcohol if declared not sober and have not filled in frequency questions
+             TRUE ~ yalkogr
+           )))
+}  
+
+df <- calculateGrAlcoholQ2(df)
 
 # physical activity----
 
@@ -281,6 +280,287 @@ df$q2.active <- find_active(df$yaktidag)
 df$q1.gramsCheese <- df$grbrostf + df$grbrostm + df$grkvostf + df$grkvostm
 
 df$q2.gramsCheese <- df$ygrbrostf + df$ygrbrostm + df$ygrkvostf + df$ygrkvostm
+
+
+# Whole grain bread----
+
+calculateGrWholeGrainBreadQ1 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q1.gramsWholeGrainBread = case_when(
+        is.na(fqgrbrod) &
+          is.na(fqknbrod) &
+          is.na(brodfin) ~ NA_real_,
+        TRUE ~ grgrbrod)
+      ))
+}
+
+df <- calculateGrWholeGrainBreadQ1(df)
+
+
+calculateGrWholeGrainBreadQ2 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q2.gramsWholeGrainBread = case_when(
+        is.na(yfqgrbrod) &
+          is.na(yfqknbrod) &
+          is.na(ybrodfin) ~ NA_real_,
+        TRUE ~ ygrgrbrod)
+      ))
+}
+
+df <- calculateGrWholeGrainBreadQ2(df)
+
+
+
+# Fruit----
+
+calculateGrFruitQ1 <- function(dataframe){
+  return(
+    dataframe %>% 
+      mutate(q1.gramsFruit = case_when(
+        is.na(fqeplepa) &
+          is.na(fqappels) &
+          is.na(fqbanan) &
+          is.na(fqanfruk) ~ NA_real_,
+        TRUE ~ grfrukt
+      ))
+  )
+}
+
+df <- calculateGrFruit(df)
+
+
+
+calculateGrFruitQ2 <- function(dataframe){
+  return(
+    dataframe %>% 
+      mutate(q2.gramsFruit = case_when(
+        is.na(yfqeplepa) &
+          is.na(yfqappels) &
+          is.na(yfqbanan) &
+          is.na(yfqanfruk) ~ NA_real_,
+        TRUE ~ ygrfrukt
+      ))
+  )
+}
+
+df <- calculateGrFruitQ2(df)
+
+
+# Vegetables----
+
+calculateGrVegetableQ1 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q1.gramsVegetable = case_when(
+        is.na(fqgulrot) &
+          is.na(fqkaal) &
+          is.na(fqbrokko)&
+          is.na(fqsalat) &
+          is.na(fqgrblan) &
+          is.na(fqkalrot)&
+          is.na(fqgrsak) ~ NA_real_,
+        TRUE ~ grgrsak
+      )))
+}
+
+df <- calculateGrVegetableQ1(df)
+
+
+calculateGrVegetableQ2 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q2.gramsVegetable = case_when(
+        is.na(yfqgulrot) &
+          is.na(yfqkaal) &
+          is.na(yfqbrokko)&
+          is.na(yfqsalat) &
+          is.na(yfqgrblan) &
+          is.na(yfqkalrot)&
+          is.na(yfqgrsak) ~ NA_real_,
+        TRUE ~ ygrgrsak
+      )))
+}
+
+df <- calculateGrVegetableQ2(df)
+
+
+
+# Red meat----
+
+calculateGrRedMeatQ1 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q1.gramsRedMeat = case_when(
+        is.na(fqsteik) &
+          is.na(fqkotele) &
+          is.na(fqbiff) &
+          is.na(fqkjkake) &#
+          is.na(fqpolse) &#
+          is.na(fqlapska) &
+          is.na(fqpizza) &
+          is.na(fqkyllin) &
+          is.na(fqkjot) ~ NA_real_,
+        TRUE ~ grrenkjo
+      ))
+  )
+}
+
+
+df <- calculateGrRedMeatQ1(df)
+
+calculateGrRedMeatQ2 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q2.gramsRedMeat = case_when(
+        is.na(yfqsteik) &
+          is.na(yfqkotele) &
+          is.na(yfqbiff) &
+          is.na(yfqkjkake) &#
+          is.na(yfqpolse) &#
+          is.na(yfqlapska) &
+          is.na(yfqpizza) &
+          is.na(yfqkyllin) &
+          is.na(yfqkjot) ~ NA_real_,
+        TRUE ~ ygrrenkjo
+      ))
+  )
+}
+
+
+df <- calculateGrRedMeatQ2(df)
+
+
+# Processed Meat----
+
+
+
+
+calculateGrProcessedMeatQ1 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q1.gramsProcessedMeat = case_when(
+        is.na(fqsteik) &
+          is.na(fqkotele) &
+          is.na(fqbiff) &
+          is.na(fqkjkake) &
+          is.na(fqpolse) &
+          is.na(fqlapska) &
+          is.na(fqpizza) &
+          is.na(fqkyllin) &
+          is.na(fqkjot) ~ NA_real_,
+        TRUE ~ (grkjkake + # as per Parr, 2013
+                  ifelse(
+                    is.na(grpolse), 
+                    0, 
+                    grpolse) + 
+                  grkjotpa)
+      ))
+  )
+}
+
+
+
+df <- calculateGrProcessedMeatQ1(df)
+
+
+
+calculateGrProcessedMeatQ2 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q2.gramsProcessedMeat = case_when(
+        is.na(yfqsteik) &
+          is.na(yfqkotele) &
+          is.na(yfqbiff) &
+          is.na(yfqkjkake) &
+          is.na(yfqpolse) &
+          is.na(yfqlapska) &
+          is.na(yfqpizza) &
+          is.na(yfqkyllin) &
+          is.na(yfqkjot) ~ NA_real_,
+        TRUE ~ (ygrkjkake + # as per Parr, 2013
+                  ifelse(
+                    is.na(ygrpolse), 
+                    0, 
+                    ygrpolse) + 
+                  ygrkjotpa)
+      ))
+  )
+}
+
+
+df <- calculateGrProcessedMeatQ2(df)
+
+# Milk----
+
+calculateGrMilkQ1 <- function(dataframe){
+  return(
+    dataframe %>% 
+      mutate(q1.gramsMilk = case_when(
+        is.na(fqhemelk) &
+          is.na(fqlemelk) &
+          is.na(fqskmelk) &
+          is.na(fqdmelk) ~ NA_real_,
+        TRUE ~ grmelk
+      ))
+  )
+}
+
+df <- calculateGrMilkQ1(df)
+
+
+
+calculateGrMilkQ2 <- function(dataframe){
+  return(
+    dataframe %>% 
+      mutate(q2.gramsMilk = case_when(
+        is.na(yfqhemelk) &
+          is.na(yfqlemelk) &
+          is.na(yfqskmelk) &
+          is.na(yfqdmelk) ~ NA_real_,
+        TRUE ~ ygrmelk
+      ))
+  )
+}
+
+df <- calculateGrMilkQ2(df)
+
+# Cheese----
+
+calculateGrCheeseQ1 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q1.gramsCheese = case_when(
+        is.na(fqsyltet) & 
+          is.na(fqbrostf) &
+          is.na(fqbrostm) &
+          is.na(fqkvostf) &
+          is.na(fqkvostm) &
+          is.na(fqkjotpa) ~ NA_real_,
+        TRUE ~ grbrostf + grbrostm + grkvostf + grkvostm
+      ))
+  )
+}
+
+df <- calculateGrCheeseQ1(df)
+
+calculateGrCheeseQ2 <- function(dataframe){
+  return(
+    dataframe %>%
+      mutate(q2.gramsCheese = case_when(
+        is.na(yfqsyltet) & 
+          is.na(yfqbrostf) &
+          is.na(yfqbrostm) &
+          is.na(yfqkvostf) &
+          is.na(yfqkvostm) &
+          is.na(yfqkjotpa) ~ NA_real_,
+        TRUE ~ ygrbrostf + ygrbrostm + ygrkvostf + ygrkvostm
+      ))
+  )
+}
+
+df <- calculateGrCheeseQ2(df)
 
 
 
@@ -358,16 +638,49 @@ df$q2.alcoholScore <- score_alcohol(df$yalkogr)
 # diet score ----
   # TODO Missing fq vars, some grams vars, and energy intake for energy adjustment
   # TODO Find absolute cutoffs for energy adjusted dietary variables to 
-df$q1.gramsWholegrain <- df$grgrbrod # still need to add grfrubla
-df$q2.gramsWholegrain <- df$ygrgrbrod
+df$q1.gramsWholegrain <- df$grgrbrod + df$grfrubla
+df$q2.gramsWholegrain <- df$ygrgrbrod + df$ygrfrubla
 
   # dairy
 
-df$q1.gramsDairy <- df$grmelk + df$q1.gramsCheese # still need to add yoghurt
+df$q1.gramsDairy <- df$q1.gramsMilk + df$q1.gramsCheese + df$gryoghur
+df$q2.gramsDairy <- df$q2.gramsMilk + df$q2.gramsCheese + df$ygryoghur
+
+
+# nutrient density
+
+find_nutrient_densities_Q1 <- function(dataframe){
+  a <- dataframe$totkjoul/1000
+  dataframe %>% 
+    mutate(
+      q1.ndWholeGrain = q1.gramsWholegrain/a,
+      q1.ndVegetable = q1.gramsVegetable/a,
+      q1.ndFruit = q1.gramsFruit/a,
+      q1.ndDairy = q1.gramsDairy/a,
+      q1.ndRedMeat = q1.gramsRedMeat/a,
+      q1.ndProcessedMeat = q1.gramsProcessedMeat/a)
   
+}
+
+df <- find_nutrient_densities_Q1(df)
+
+find_nutrient_densities_Q2 <- function(dataframe){
+  a <- dataframe$ytotkjoul/1000
+  dataframe %>% 
+    mutate(
+      q2.ndWholeGrain = q2.gramsWholegrain/a,
+      q2.ndVegetable = q2.gramsVegetable/a,
+      q2.ndFruit = q2.gramsFruit/a,
+      q2.ndDairy = q2.gramsDairy/a,
+      q2.ndRedMeat = q2.gramsRedMeat/a,
+      q2.ndProcessedMeat = q2.gramsProcessedMeat/a)
+  
+}
+
+df <- find_nutrient_densities_Q2(df)
 
 
-score_diet_full <- function(wholegrain,
+score_diet_full_Q1 <- function(wholegrain,
                             vegetable,
                             fruit,
                             dairy,
@@ -400,6 +713,156 @@ score_diet_full <- function(wholegrain,
   g <- a+b+c+d+e+f
   return(g)}
 
+df$q1.dietScoreFull <- score_diet_full_Q1(df$q1.ndWholeGrain,
+                                          df$q1.ndVegetable,
+                                          df$q1.ndFruit,
+                                          df$q1.ndDairy,
+                                          df$q1.ndRedMeat,
+                                          df$q1.ndProcessedMeat)
+
+quantile(df$q1.ndWholeGrain, probs =seq(0,1, 0.25), na.rm=TRUE)
+quantile(df$q1.ndVegetable, probs =seq(0,1, 0.25), na.rm=TRUE)
+quantile(df$q1.ndFruit, probs =seq(0,1, 0.25), na.rm=TRUE)
+quantile(df$q1.ndDairy, probs =seq(0,1, 0.25), na.rm=TRUE)
+quantile(df$q1.ndRedMeat, probs =seq(0,1, 0.25), na.rm=TRUE)
+quantile(df$q1.ndProcessedMeat, probs =seq(0,1, 0.25), na.rm=TRUE)
+
+
+
+score_diet_full_Q2 <- function(wholegrain, # base cutpoint on Q1 quantiles for nutrient density variables
+                               vegetable,
+                               fruit,
+                               dairy,
+                               red_meat,
+                               processed_meat){ 
+  a <- cut(wholegrain, breaks = c(
+    0, 13.72589, 18.66699, 23.85540, 90.09577),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  a <- as.numeric(as.character(a))
+  b <- cut(vegetable, breaks = c(
+    0, 11.39690, 17.54922, 25.98288, 250.24961),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  b <- as.numeric(as.character(b))
+  c <- cut(fruit, breaks = c(
+    0,13.80500, 24.21816, 38.40811, 363.21080),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  c <- as.numeric(as.character(c))
+  d <- cut(dairy, breaks = c(
+    0, 16.30475,31.32657, 54.47469, 299.77021),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  d <- as.numeric(as.character(d))
+  e <- cut(red_meat, breaks = c(
+    0,1.054850,1.905374,3.007543,33.185089),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  e <- as.numeric(as.character(e))
+  f <- cut(processed_meat, breaks = c(
+    0,2.663930,4.314017,3.362097,61.962624),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  f <- as.numeric(as.character(f))
+  g <- a+b+c+d+e+f
+  return(g)}
+
+df$q2.dietScoreFull <- score_diet_full_Q2(df$q2.ndWholeGrain,
+                                          df$q2.ndVegetable,
+                                          df$q2.ndFruit,
+                                          df$q2.ndDairy,
+                                          df$q2.ndRedMeat,
+                                          df$q2.ndProcessedMeat)
+
+
+# HLI diet
+
+score_diet_Q1 <- function(wholegrain,
+                               vegetable,
+                               fruit,
+                               dairy,
+                               red_meat,
+                               processed_meat){ 
+  a <- cut(wholegrain, breaks = c(
+    quantile(wholegrain, probs =seq(0,1, 0.25), na.rm=TRUE)),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  a <- as.numeric(as.character(a))
+  b <- cut(vegetable, breaks = c(
+    quantile(vegetable, probs = seq(0,1, 0.25), na.rm=TRUE)),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  b <- as.numeric(as.character(b))
+  c <- cut(fruit, breaks = c(
+    quantile(fruit, probs = seq(0,1, 0.25), na.rm=TRUE)),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  c <- as.numeric(as.character(c))
+  d <- cut(dairy, breaks = c(
+    quantile(dairy, probs = seq(0,1, 0.25), na.rm=TRUE)),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  d <- as.numeric(as.character(d))
+  e <- cut(red_meat, breaks = c(
+    quantile(red_meat, probs = seq(0,1, 0.25), na.rm=TRUE)),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  e <- as.numeric(as.character(e))
+  f <- cut(processed_meat, breaks = c(
+    quantile(processed_meat, probs = seq(0,1, 0.25), na.rm=TRUE)),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  f <- as.numeric(as.character(f))
+  g <- a+b+c+d+e+f
+  g <- cut(g, breaks = c(
+    quantile(g, probs = seq(0, 1, 0.2), na.rm=TRUE)), 
+    labels = c("0", "1", "2", "3", "4"), include.lowest = TRUE, right = FALSE)
+  g <- as.numeric(as.character(g))
+  return(g)}
+
+
+df$q1.dietScore <- score_diet_Q1(df$q1.ndWholeGrain,
+                                 df$q1.ndVegetable,
+                                 df$q1.ndFruit,
+                                 df$q1.ndDairy,
+                                 df$q1.ndRedMeat,
+                                 df$q1.ndProcessedMeat)
+
+
+score_diet_Q2 <- function(wholegrain, # base cutpoint on Q1 quantiles for nutrient density variables
+                               vegetable,
+                               fruit,
+                               dairy,
+                               red_meat,
+                               processed_meat){ 
+  a <- cut(wholegrain, breaks = c(
+    0, 13.72589, 18.66699, 23.85540, 90.09577),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  a <- as.numeric(as.character(a))
+  b <- cut(vegetable, breaks = c(
+    0, 11.39690, 17.54922, 25.98288, 250.24961),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  b <- as.numeric(as.character(b))
+  c <- cut(fruit, breaks = c(
+    0,13.80500, 24.21816, 38.40811, 363.21080),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  c <- as.numeric(as.character(c))
+  d <- cut(dairy, breaks = c(
+    0, 16.30475,31.32657, 54.47469, 299.77021),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  d <- as.numeric(as.character(d))
+  e <- cut(red_meat, breaks = c(
+    0,1.054850,1.905374,3.007543,33.185089),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  e <- as.numeric(as.character(e))
+  f <- cut(processed_meat, breaks = c(
+    0,2.663930,4.314017,3.362097,61.962624),
+    labels = c("3","2", "1", "0"), include.lowest = TRUE, right = FALSE)
+  f <- as.numeric(as.character(f))
+  g <- a+b+c+d+e+f
+  g <- cut(g, breaks = c(
+    quantile(g, probs = seq(0, 1, 0.2), na.rm=TRUE)), 
+    labels = c("0", "1", "2", "3", "4"), include.lowest = TRUE, right = FALSE)
+  g <- as.numeric(as.character(g))
+  return(g)
+  
+  }
+
+df$q2.dietScore <- score_diet_Q2(df$q2.ndWholeGrain,
+                                 df$q2.ndVegetable,
+                                 df$q2.ndFruit,
+                                 df$q2.ndDairy,
+                                 df$q2.ndRedMeat,
+                                 df$q2.ndProcessedMeat)
 
 
 # HLI score 
@@ -409,10 +872,12 @@ score_diet_full <- function(wholegrain,
 df$q1.hli <- df$q1.physicalActivityScore +
   df$q1.bmiScore +
   df$q1.smokingScore +
-  df$q1.alcoholScore 
+  df$q1.alcoholScore +
+  df$q1.dietScore
 
 df$q2.hli <- df$q2.physicalActivityScore +
   df$q2.bmiScore +
   df$q2.smokingScore +
-  df$q2.alcoholScore 
+  df$q2.alcoholScore +
+  df$q2.dietScore
 
