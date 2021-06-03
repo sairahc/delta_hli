@@ -40,40 +40,13 @@ df$dateDeath <- as.Date(df$doddt, format= "%d/%m/%Y")
 df$dateEmigration <- as.Date(df$emigdt, format = "%d/%m/%Y")
 df$dateDiagnosis <- as.Date(df$diagdat, format = "%d/%m/%Y")
 df$dateBirth <- as.Date(paste0("010719", df$faar),"%d%m%Y")
-
-# find date of q1
-df <- df %>%
-  mutate(q1.date = case_when(serienr >= 11 & serienr<=16 ~ "01071996",
-                             serienr >= 19 & serienr<=24 ~ "01071996",
-                             serienr == 26 | serienr == 28| serienr == 29 ~ "01071998",
-                             serienr == 32 | serienr == 33 ~ "01072002",
-                             serienr == 35 ~ "07012003",
-                             serienr == 36 ~ "07012004",
-                             TRUE ~ NA_character_
-  )
-)
-
-df$q1.date <- as.Date(df$q1.date, "%d%m%Y")
-
-# find date of q2
-df <- df %>%
-  mutate(q2.date = case_when(yserienr == 32 | yserienr==33 ~ "01072002",
-                             yserienr == 38 | yserienr == 39 ~ "01072004",
-                             yserienr == 42 ~ "01072005",
-                             yserienr == 46 ~ "01072010",
-                             yserienr == 47 ~ "01072011",
-                             yserienr == 48 ~ "01072014",
-                             TRUE ~ NA_character_
-  )
-  )
-
-df$q2.date <- as.Date(df$q2.date, "%d%m%Y")
-
+df$q1.date <- as.Date(df$startdat, format="%d/%m/%Y")
+df$q2.date <- as.Date(df$ystartdat, format="%d/%m/%Y")
 
 
 # find age at Q1 and Q2
-df$q1.age <- (df$q1.date - df$dateBirth)/365.25
-df$q2.age <- (df$q2.date - df$dateBirth)/365.25
+df$q1.age <- as.numeric((df$q1.date - df$dateBirth)/365.25)
+df$q2.age <- as.numeric((df$q2.date - df$dateBirth)/365.25)
 
 # follow up time 
 find_follow_up_time_days <- function(dataframe){
@@ -88,6 +61,7 @@ find_follow_up_time_days <- function(dataframe){
 
 
 df <- find_follow_up_time_days(df)
+df$followUpTimeDays <- as.numeric(df$followUpTimeDays)
 
 # find how many people died and emigrated before follow up
 
@@ -106,7 +80,7 @@ find_age_exit <- function(dataframe){
 }
 
 df <- find_age_exit(df)
-
+df$ageExit <- as.numeric(df$ageExit)
 
 
 
@@ -267,20 +241,7 @@ find_active <- function(physical_activity) {
 df$q1.active <- find_active(df$aktidag)
 df$q2.active <- find_active(df$yaktidag)
 
-# diet ---- waiting on fq vars
-
-# whole grain bread 
-    # need to get wholegrain bread variables to incorporate frequency
-
-# fruit
-    # need to get fruit variables to incorporate frequency
-
-# cheese
-
-df$q1.gramsCheese <- df$grbrostf + df$grbrostm + df$grkvostf + df$grkvostm
-
-df$q2.gramsCheese <- df$ygrbrostf + df$ygrbrostm + df$ygrkvostf + df$ygrkvostm
-
+# diet ---- 
 
 # Whole grain bread----
 
@@ -328,7 +289,7 @@ calculateGrFruitQ1 <- function(dataframe){
   )
 }
 
-df <- calculateGrFruit(df)
+df <- calculateGrFruitQ1(df)
 
 
 
@@ -587,7 +548,8 @@ score_bmi <- function(bmi){
                  bmi > 27 ~ 1,
                  bmi > 25 ~ 2,
                  bmi > 23 ~ 3,
-                 TRUE ~ 4
+                 bmi > 0 ~ 4,
+                 TRUE ~ NA_real_
   )
 }
 
@@ -627,7 +589,8 @@ score_alcohol <- function(daily_grams_alcohol_intake){
                  daily_grams_alcohol_intake > 10 ~ 1,
                  daily_grams_alcohol_intake > 5 ~ 2,
                  daily_grams_alcohol_intake > 0 ~ 3,
-                 TRUE ~ 4)
+                 daily_grams_alcohol_intake == 0 ~ 4,
+                 TRUE ~ NA_real_)
   return(a)
 }
 
@@ -867,7 +830,7 @@ df$q2.dietScore <- score_diet_Q2(df$q2.ndWholeGrain,
 
 # HLI score 
 
-  # TODO add diet score
+
 
 df$q1.hli <- df$q1.physicalActivityScore +
   df$q1.bmiScore +
@@ -881,3 +844,322 @@ df$q2.hli <- df$q2.physicalActivityScore +
   df$q2.alcoholScore +
   df$q2.dietScore
 
+
+# HLI groups
+
+df$q1.hliGroup <- cut(df$q1.hli, c(0,5,10,15,20), include.lowest = TRUE)
+df$q2.hliGroup <- cut(df$q2.hli, c(0,5,10,15,20), include.lowest = TRUE)
+
+# time difference between questionnaires in years
+df$q1.q2.timeDifferenceYears <- as.numeric((df$q2.date - df$q1.date)/365.25)
+
+# absolute change in HLI
+df$hliChange <- df$q2.hli - df$q1.hli
+
+# change in HLI per year
+
+df$hliChangeYearly <- df$hliChange/df$q1.q2.timeDifferenceYears
+
+# categories for hli change
+
+# +/-1 point considered stable
+
+df$hliChange_plusminus1Stable <- cut(df$hliChange, c(-15, -1.1, 1, 15))
+df$hliChange_plusminus2Stable <- cut(df$hliChange, c(-15,-2.1, 2, 15))
+
+# change in individual HLI factors ----
+    # physical activity
+df$physicalActivityChange <- df$yaktidag-df$aktidag
+    # BMI
+df$bmiChange <- df$q2.bmi-df$q1.bmi
+    # smoking status
+df$smokingStatusChange <- case_when(
+  (df$roykstat==1 & df$yroykstat==1) |(df$roykstat==2 & df$yroykstat==2)~ "non-smoking maintainer",
+  df$roykstat==3 & df$yroykstat==2~ "quitter",
+  (df$roykstat==1|df$roykstat==2) & df$yroykstat==3~ "started/re-started smoking",             
+  df$roykstat==3 & df$yroykstat==3 ~ "constant smoker",
+  (df$roykstat==3|df$roykstat==2) & df$yroykstat==1~ "later denier",                 
+  df$roykstat==1 & df$yroykstat== 2 ~ "quick smoker/later admitter",           
+  TRUE~NA_character_
+)
+                                                
+    # alcohol
+df$alcoholChange <- df$yalkogr-df$alkogr
+    # diet
+df$dietChange <- df$q2.dietScoreFull-df$q1.dietScoreFull
+
+
+# how many within each Q1 HLI group are >=HLI 13 at Q2?
+
+
+
+df$improved13above <- case_when(df$q2.hli >= 13 & df$q1.hli < 13 ~ "improved 13 above",
+                                df$q2.hli >= 13 & df$q1.hli >= 13 ~ "maintain 13 above",
+                                df$q2.hli <13 & df$q1.hli <13 ~ " maintain below 13")
+
+
+
+
+
+# endpoint formatting ----
+
+# overall cancer status
+df$statusCancer <- ifelse(df$icd10_gr =="",
+                          0,
+                          1)
+
+# colorectal cancer status
+
+findColonCancerStatus <- function(dataframe){
+  dataframe%>%
+    mutate(statusColon = ifelse(dataframe$icd10_gr =="C18"|
+                                  dataframe$icd10_gr == "C181" |
+                                  dataframe$icd10_gr == "C183" |
+                                  dataframe$icd10_gr == "C184" |
+                                  dataframe$icd10_gr == "C185" |
+                                  dataframe$icd10_gr == "C186" |
+                                  dataframe$icd10_gr == "C187" |
+                                  dataframe$icd10_gr == "C188" |
+                                  dataframe$icd10_gr == "C189",
+                                TRUE,
+                                FALSE)
+    )
+}
+
+df <- findColonCancerStatus(df)
+
+findRectalCancerStatus <- function(dataframe){
+  dataframe%>%
+    mutate(statusRectal = ifelse(dataframe$icd10_gr =="C19"|
+                                   dataframe$icd10_gr == "C199" |
+                                   dataframe$icd10_gr == "C20" |
+                                   dataframe$icd10_gr == "C209",
+                                 TRUE,
+                                 FALSE)
+    )
+}
+
+
+df <- findRectalCancerStatus(df)
+
+findColorectalCancerStatus <- function(dataframe){
+  dataframe%>%
+    mutate(statusColorectal = ifelse(dataframe$statusColon == TRUE |
+                                       dataframe$statusRectal == TRUE,
+                                     TRUE,
+                                     FALSE
+    ))
+}
+
+
+df <- findColorectalCancerStatus(df)
+
+# Lung cancer status 
+
+
+findLungCancerStatus <- function(dataframe){
+  dataframe%>%
+    mutate(statusLung = ifelse(dataframe$icd10_gr=="C340" |
+                                 dataframe$icd10_gr=="C341" |
+                                 dataframe$icd10_gr=="C342" |
+                                 dataframe$icd10_gr=="C343" |
+                                 dataframe$icd10_gr=="C348" |
+                                 dataframe$icd10_gr=="C349" ,
+                               TRUE, #true if event occurs
+                               FALSE #false if censored
+    ))
+}
+
+
+df <- findLungCancerStatus(df)
+
+
+
+# alcohol related cancer status
+
+findAlcoholStatus <- function(dataframe){
+  dataframe %>%
+    mutate(statusAlcohol = ifelse(
+      icd10_gr=="C180"| # colorectal
+        icd10_gr=="C181"|
+        icd10_gr=="C182"|
+        icd10_gr=="C183"|
+        icd10_gr=="C184"|
+        icd10_gr=="C185"|
+        icd10_gr=="C186"|
+        icd10_gr=="C187"|
+        icd10_gr=="C188"|
+        icd10_gr=="C189"|
+        icd10_gr=="C199"|
+        icd10_gr=="C50"| # breast
+        icd10_gr=="C01"| # upper aerodigestive
+        icd10_gr=="C02"|
+        icd10_gr=="C03"|
+        icd10_gr=="C04"|
+        icd10_gr=="C05"|
+        icd10_gr=="C06"|
+        icd10_gr=="C07"|
+        icd10_gr=="C09"|
+        icd10_gr=="C10"|
+        icd10_gr=="C32"| # larynx
+        icd10_gr=="C11"| # pharynx
+        icd10_gr=="C12"|
+        icd10_gr=="C13"|
+        icd10_gr=="C14"|
+        icd10_gr=="C15"| # esophagus
+        icd10_gr=="C22"| # liver
+        icd10_gr=="C23"|
+        icd10_gr=="C24",
+      TRUE,
+      FALSE
+    ))
+}
+
+df <- findAlcoholStatus(df)
+
+# tobacco related cancer status
+
+findTobaccoStatus <- function(dataframe){
+  dataframe %>%
+    mutate(statusTobacco = ifelse(icd10_gr=="C01"| # upper aerodigestive
+                                    icd10_gr=="C02"|# upper aerodigestive
+                                    icd10_gr=="C03"|# upper aerodigestive
+                                    icd10_gr=="C04"|# upper aerodigestive
+                                    icd10_gr=="C05"|# upper aerodigestive
+                                    icd10_gr=="C06"|# upper aerodigestive
+                                    icd10_gr=="C07"|# upper aerodigestive
+                                    icd10_gr=="C09"|# upper aerodigestive
+                                    icd10_gr=="C32"|# larynx
+                                    icd10_gr=="C11"|# pharynx
+                                    icd10_gr=="C12"|# pharynx
+                                    icd10_gr=="C13"|# pharynx
+                                    icd10_gr=="C14"|# pharynx
+                                    icd10_gr=="C15"|# esophagus
+                                    icd10_gr=="C22"|# liver
+                                    icd10_gr=="C23"|# liver
+                                    icd10_gr=="C24"|# liver
+                                    icd10_gr=="C25"|# pancreas
+                                    icd10_gr=="C18"| # colorectal
+                                    icd10_gr=="C180"|
+                                    icd10_gr=="C181"|
+                                    icd10_gr=="C182"|
+                                    icd10_gr=="C183"|
+                                    icd10_gr=="C184"|
+                                    icd10_gr=="C185"|
+                                    icd10_gr=="C186"|
+                                    icd10_gr=="C187"|
+                                    icd10_gr=="C188"|
+                                    icd10_gr=="C189"|
+                                    icd10_gr=="C199"|
+                                    icd10_gr=="C209"|
+                                    icd10_gr=="C67"|# bladder
+                                    icd10_gr=="C64"|# kidney
+                                    icd10_gr=="C65"|# kidney
+                                    icd10_gr=="C53"|# cervix
+                                    icd10_gr=="C16"|# stomach
+                                    icd10_gr=="C33"|# trachea
+                                    icd10_gr=="C340"|# lung
+                                    icd10_gr=="C341"|
+                                    icd10_gr=="C342"|
+                                    icd10_gr=="C343"|
+                                    icd10_gr=="C348"|
+                                    icd10_gr=="C349"|
+                                    icd10_gr=="C92",# acute myeloid leukemia
+                                  TRUE,
+                                  FALSE
+                                  )
+    )
+                                    
+                                    
+                                  
+}
+
+df <- findTobaccoStatus(df)
+
+
+# obesity related cancer status
+
+findObesityStatus <- function(dataframe){
+  dataframe %>%
+    mutate(statusObesity = ifelse(
+      icd10_gr=="C15"| # esophagus
+        icd10_gr=="C25"| # pancreas
+        icd10_gr=="C180"| # crc
+        icd10_gr=="C181"| 
+        icd10_gr=="C182"|
+        icd10_gr=="C183"|
+        icd10_gr=="C184"|
+        icd10_gr=="C185"|
+        icd10_gr=="C186"|
+        icd10_gr=="C187"|
+        icd10_gr=="C188"|
+        icd10_gr=="C189"|
+        icd10_gr=="C199"|
+        icd10_gr=="C209"| # crc
+        icd10_gr=="C50"| # breast
+        icd10_gr=="C54"| # endometrial
+        icd10_gr=="C64"| # kidney
+        icd10_gr=="C65"| # kidney
+        icd10_gr=="C73"| # thyroid
+        icd10_gr=="C23", # gallbladder
+      TRUE,
+      FALSE
+    )
+    )
+        
+}
+
+df <- findObesityStatus(df)
+
+# female breast and reproductive related cancers
+
+findReproductiveStatus <- function(dataframe) {
+  dataframe %>% 
+    mutate(statusReproductive = ifelse(
+      icd10_gr=="C50"| # breast
+        icd10_gr=="C51"| # vulva 
+        icd10_gr=="C52"| # vagina
+        icd10_gr=="C53"| # cervix
+        icd10_gr=="C54"| # uterine
+        icd10_gr=="C55"| # uterine
+        icd10_gr=="C56"| # ovarian
+        icd10_gr=="C57"| # other female genital organs
+        icd10_gr=="C58", # other female genital organs
+      TRUE,
+      FALSE
+    )
+    )
+  
+}
+
+df <- findReproductiveStatus(df)
+
+# lifestyle cancer status
+
+findLifestyleCancerStatus <- function(dataframe){
+  dataframe %>%
+    mutate(statusLifestyle = ifelse(
+      statusAlcohol == T|
+        statusTobacco == T|
+        statusObesity == T |
+        statusReproductive == T,
+      TRUE,
+      FALSE
+    )
+    )
+  
+}
+
+df <- findLifestyleCancerStatus(df)
+
+
+
+
+
+
+
+#########################
+
+# create dataframe with only complete cases
+
+df <- df[!is.na(df$q1.hli) & !is.na(df$q2.hli),]
