@@ -1,4 +1,5 @@
 data/*
+output/*
 
 r_docs/04_flexible_parametric.R
 r_docs/00_useful_keepers.R
