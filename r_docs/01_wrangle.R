@@ -22,10 +22,11 @@ library(lubridate)
 
 
 # load data
-df <- read.csv("C:/Users/sch044/OneDrive - UiT Office 365/R/delta_hli/data/09052021.csv")
+df <- read.csv("C:/Users/sch044/OneDrive - UiT Office 365/R/delta_hli/data/29062021b.csv")
 
 # convert all colnames to lowercase
 colnames(df) <- tolower(colnames(df))
+
 
 # remove all obs that do not have a second questionnaire
 df <- df[!is.na(df$yserienr),]
@@ -42,7 +43,10 @@ df$dateDiagnosis <- as.Date(df$diagdat, format = "%d/%m/%Y")
 df$dateBirth <- as.Date(paste0("010719", df$faar),"%d%m%Y")
 df$q1.date <- as.Date(df$startdat, format="%d/%m/%Y")
 df$q2.date <- as.Date(df$ystartdat, format="%d/%m/%Y")
-
+df$q2.year <- as.numeric(substr(df$ystartdat,7,10)) # calendar year of Q2
+df$prePost2000Cohort <- ifelse(df$q1.date > as.Date("01/01/1998", format="%d/%m/%Y"),
+                               1,
+                               0)
 
 # find age at Q1 and Q2
 df$q1.age <- as.numeric((df$q1.date - df$dateBirth)/365.25)
@@ -65,12 +69,12 @@ df$followUpTimeDays <- as.numeric(df$followUpTimeDays)
 
 # find how many people died and emigrated before follow up
 
-table(df$dateDeath < df$q2.date)
-table(df$dateEmigration < df$q2.date)
-table(df$dateDiagnosis < df$q2.date)
+table(df$dateDeath <= df$q2.date)
+table(df$dateEmigration <= df$q2.date)
+table(df$dateDiagnosis <= df$q2.date)
 
 # exclude prevalent cancers, death, emigration before start of follow-up
-df <- df[df$followUpTimeDays>=0, ]
+df <- df[df$followUpTimeDays>0, ]
 
 # age exit
 find_age_exit <- function(dataframe){
@@ -167,7 +171,7 @@ find_q2_smoking_intensity <- function(dataframe){
           )
         )
       )
-}
+} 
 
 df <- find_q2_smoking_intensity(df)
 
@@ -195,6 +199,15 @@ years_since_smoking_cessation_q2 <- function(dataframe){
 }
 
 df <- years_since_smoking_cessation_q2(df)
+
+# make all liars (q1 ever smoker --> q2 never smoker) former smokers at q2
+
+df$yroykstat <- ifelse((df$roykstat == 2 | df$roykstat ==3) &
+                         df$yroykstat ==1,
+                       2,
+                       df$yroykstat
+)
+
 
 
 # alcohol ----
@@ -284,8 +297,12 @@ calculateGrFruitQ1 <- function(dataframe){
           is.na(fqappels) &
           is.na(fqbanan) &
           is.na(fqanfruk) ~ NA_real_,
-        TRUE ~ grfrukt
+        TRUE ~ (grfrukt + ifelse(
+          is.na(grjordbar), 
+          0, 
+          grjordbar)
       ))
+  )
   )
 }
 
@@ -301,9 +318,17 @@ calculateGrFruitQ2 <- function(dataframe){
           is.na(yfqappels) &
           is.na(yfqbanan) &
           is.na(yfqanfruk) ~ NA_real_,
-        TRUE ~ ygrfrukt
-      ))
-  )
+        TRUE ~ ygrfrukt + ifelse(
+          is.na(grjordbar),
+          0,
+          grjordbar) + ifelse(
+            is.na(grannbar),
+            0,
+            grannbar)
+          )
+        )
+      )
+  
 }
 
 df <- calculateGrFruitQ2(df)
@@ -445,10 +470,25 @@ calculateGrProcessedMeatQ2 <- function(dataframe){
                     is.na(ygrpolse), 
                     0, 
                     ygrpolse) + 
-                  ygrkjotpa)
+                  ifelse(
+                    is.na(ygrkjotpa),
+                    0,
+                    ygrkjotpa) +
+                  ifelse(
+                    is.na(ygrfkjotpa),
+                    0,
+                    ygrfkjotpa) +
+                  ifelse(
+                    is.na(ygrmkjotpa),
+                    0,
+                    ygrmkjotpa
+                  )
+                  
       ))
   )
+  )
 }
+
 
 
 df <- calculateGrProcessedMeatQ2(df)
@@ -531,17 +571,28 @@ df <- calculateGrCheeseQ2(df)
 
 # physical activity score 
 
+#score_physical_activity <- function(physicalActivity){
+#  a <- cut(physicalActivity, breaks = c(1,4,5,6,7,11), 
+#    labels = c("0", "1", "2", "3", "4"), include.lowest = TRUE, right = FALSE)
+#  a <- as.numeric(as.character(a))
+#  return(a)
+#}
+
 score_physical_activity <- function(physicalActivity){
-  a <- cut(physicalActivity, breaks = c(1,4,5,6,7,11), 
-    labels = c("0", "1", "2", "3", "4"), include.lowest = TRUE, right = FALSE)
+  a <- cut(physicalActivity, breaks = c(1,3,5,7,9,11), 
+           labels = c("0", "1", "2", "3", "4"), include.lowest = TRUE, right = FALSE)
   a <- as.numeric(as.character(a))
   return(a)
 }
+
 
 df$q1.physicalActivityScore <- score_physical_activity(df$aktidag)
 df$q2.physicalActivityScore <- score_physical_activity(df$yaktidag)
 
 # BMI score
+
+
+
 
 score_bmi <- function(bmi){
   a <- case_when(bmi > 30 ~ 0,
@@ -552,6 +603,17 @@ score_bmi <- function(bmi){
                  TRUE ~ NA_real_
   )
 }
+
+#score_bmi <- function(bmi){
+#  a <- case_when(bmi >= 30 ~ 0,
+#                 (bmi >= 27 & bmi < 30) | bmi < 18.5 ~ 1,
+#                 bmi >= 25 & bmi < 27 ~ 2,
+#                 bmi >= 23 & bmi < 25 ~ 3,
+#                 bmi >= 18.5 & bmi < 23 ~ 4,
+#                 TRUE ~ NA_real_
+#  )
+#}
+
 
 df$q1.bmiScore <- score_bmi(df$q1.bmi)
 df$q2.bmiScore <- score_bmi(df$q2.bmi)
@@ -581,6 +643,7 @@ df$q2.smokingScore <- score_smoking(df$yroykstat,
                                     df$q2.yearsSinceSmokingCessation, 
                                     df$q2.smokingIntensity)
 
+
 # alcohol score
 
 
@@ -601,8 +664,8 @@ df$q2.alcoholScore <- score_alcohol(df$yalkogr)
 # diet score ----
   # TODO Missing fq vars, some grams vars, and energy intake for energy adjustment
   # TODO Find absolute cutoffs for energy adjusted dietary variables to 
-df$q1.gramsWholegrain <- df$grgrbrod + df$grfrubla
-df$q2.gramsWholegrain <- df$ygrgrbrod + df$ygrfrubla
+df$q1.gramsWholegrain <- df$q1.gramsWholeGrainBread + df$grfrubla
+df$q2.gramsWholegrain <- df$q2.gramsWholeGrainBread + df$ygrfrubla
 
   # dairy
 
@@ -850,6 +913,21 @@ df$q2.hli <- df$q2.physicalActivityScore +
 df$q1.hliGroup <- cut(df$q1.hli, c(0,5,10,15,20), include.lowest = TRUE)
 df$q2.hliGroup <- cut(df$q2.hli, c(0,5,10,15,20), include.lowest = TRUE)
 
+# baseline HLI dummy groups
+
+df$q1.hliGroup.0.5 <- ifelse(df$q1.hliGroup=="[0,5]",
+                             1,
+                             0)
+df$q1.hliGroup.6.10 <- ifelse(df$q1.hliGroup=="(5,10]",
+                             1,
+                             0)
+df$q1.hliGroup.11.15 <- ifelse(df$q1.hliGroup=="(10,15]",
+                              1,
+                              0)
+df$q1.hliGroup.16.20 <- ifelse(df$q1.hliGroup=="(15,20]",
+                               1,
+                               0)
+
 # time difference between questionnaires in years
 df$q1.q2.timeDifferenceYears <- as.numeric((df$q2.date - df$q1.date)/365.25)
 
@@ -859,6 +937,12 @@ df$hliChange <- df$q2.hli - df$q1.hli
 # change in HLI per year
 
 df$hliChangeYearly <- df$hliChange/df$q1.q2.timeDifferenceYears
+
+# change in HLI per 5 years
+df$hliChange5Year <- df$hliChangeYearly*5
+
+# change in HLi per 5 year rounded
+df$hliChange5YearRounded <- round(df$hliChange5Year, digits=0)
 
 # categories for hli change
 
@@ -870,8 +954,13 @@ df$hliChange_plusminus2Stable <- cut(df$hliChange, c(-15,-2.1, 2, 15))
 # change in individual HLI factors ----
     # physical activity
 df$physicalActivityChange <- df$yaktidag-df$aktidag
+df$physicalActivityScoreChange <- df$q2.physicalActivityScore - df$q1.physicalActivityScore
+df$physicalActivityScoreChange5Year <- df$physicalActivityScoreChange / df$q1.q2.timeDifferenceYears
     # BMI
 df$bmiChange <- df$q2.bmi-df$q1.bmi
+df$bmiScoreChange <- df$q2.bmiScore - df$q1.bmiScore
+df$bmiScoreChange5Year <- df$bmiScoreChange / df$q1.q2.timeDifferenceYears
+
     # smoking status
 df$smokingStatusChange <- case_when(
   (df$roykstat==1 & df$yroykstat==1) |(df$roykstat==2 & df$yroykstat==2)~ "non-smoking maintainer",
@@ -882,11 +971,20 @@ df$smokingStatusChange <- case_when(
   df$roykstat==1 & df$yroykstat== 2 ~ "quick smoker/later admitter",           
   TRUE~NA_character_
 )
-                                                
+
+df$smokingScoreChange <- df$q2.smokingScore - df$q1.smokingScore
+df$smokingScoreChange5Year <- df$smokingScoreChange / df$q1.q2.timeDifferenceYears                                                
+
     # alcohol
 df$alcoholChange <- df$yalkogr-df$alkogr
+df$alcoholScoreChange <- df$q2.alcoholScore - df$q1.alcoholScore
+df$alcoholScoreChange5Year <- df$alcoholScoreChange / df$q1.q2.timeDifferenceYears
+
     # diet
 df$dietChange <- df$q2.dietScoreFull-df$q1.dietScoreFull
+df$dietScoreChange <- df$q2.dietScore - df$q1.dietScore
+df$dietScoreChange5Year <- df$dietScoreChange / df$q1.q2.timeDifferenceYears
+
 
 
 # how many within each Q1 HLI group are >=HLI 13 at Q2?
@@ -897,8 +995,140 @@ df$improved13above <- case_when(df$q2.hli >= 13 & df$q1.hli < 13 ~ "improved 13 
                                 df$q2.hli >= 13 & df$q1.hli >= 13 ~ "maintain 13 above",
                                 df$q2.hli <13 & df$q1.hli <13 ~ " maintain below 13")
 
+# make categories of change according to baseline
+df <- df %>% 
+  mutate(changeCategoriesUnstratified =
+           case_when(q1.hliGroup== "[0,5]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~ "HLI 0-5 decrease",
+                     q1.hliGroup=="(5,10]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~"HLI 5-10 decrease",
+                     q1.hliGroup== "(10,15]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~"HLI 10-15 decrease",
+                     q1.hliGroup== "(15,20]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~"HLI 15-20 decrease",
+                     q1.hliGroup== "[0,5]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 0-5 stable",
+                     q1.hliGroup== "(5,10]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 5-10 stable",
+                     q1.hliGroup== "(10,15]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 10-15 stable",
+                     q1.hliGroup== "(15,20]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 15-20 stable",
+                     q1.hliGroup== "[0,5]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 0-5 increase",
+                     q1.hliGroup== "(5,10]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 5-10 increase",
+                     q1.hliGroup== "(10,15]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 10-15 increase",
+                     q1.hliGroup== "(15,20]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 15-20 increase"
+           )
+  )
+
+df$changeCategoriesUnstratified <- relevel(as.factor(df$changeCategoriesUnstratified), ref= "HLI 10-15 stable")
+
+df <- df %>% 
+  mutate(changeCategoriesUnstratified05Merged = # merge 0-5 decrease and stable bc no cases in 0-5 decrease group (may not be the case in imputed dataset)
+           case_when(q1.hliGroup== "[0,5]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~ "HLI 0-5 decrease/stable",
+                     q1.hliGroup=="(5,10]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~"HLI 5-10 decrease",
+                     q1.hliGroup== "(10,15]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~"HLI 10-15 decrease",
+                     q1.hliGroup== "(15,20]" & hliChange_plusminus2Stable == "(-15,-2.1]" ~"HLI 15-20 decrease",
+                     q1.hliGroup== "[0,5]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 0-5 decrease/stable",
+                     q1.hliGroup== "(5,10]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 5-10 stable",
+                     q1.hliGroup== "(10,15]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 10-15 stable",
+                     q1.hliGroup== "(15,20]" & hliChange_plusminus2Stable == "(-2.1,2]" ~"HLI 15-20 stable",
+                     q1.hliGroup== "[0,5]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 0-5 increase",
+                     q1.hliGroup== "(5,10]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 5-10 increase",
+                     q1.hliGroup== "(10,15]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 10-15 increase",
+                     q1.hliGroup== "(15,20]" & hliChange_plusminus2Stable == "(2,15]" ~ "HLI 15-20 increase"
+           )
+  )
 
 
+
+# make change categories not according to baseline
+
+
+df <- df %>%
+  mutate(changeCategories7 = 
+           case_when(hliChange5YearRounded<= -3 ~ "<= -3",
+                     hliChange5YearRounded== -2 ~ "-2",
+                     hliChange5YearRounded== -1 ~ "-1",
+                     hliChange5YearRounded== 0 ~ "0",
+                     hliChange5YearRounded== 1 ~ "1",
+                     hliChange5YearRounded== 2 ~ "2",
+                     hliChange5YearRounded>= 3 ~ ">= 3"
+                     )
+         )
+# categories for the PAF comparing >=3 change to the rest
+
+df$hliChange3plus <- ifelse(df$hliChange5Year >= 3,
+                            1,
+                            0)
+
+
+# reproductive related covariates ----
+
+findMenopauseStatus.q2 <- function(dataframe){
+  dataframe %>%
+    mutate(q2.menopausalStatus = case_when(dataframe$klimald >= dataframe$q2.age ~ "premenopausal",
+                                           dataframe$klimald < dataframe$q2.age ~ "postmenopausal",
+                                           is.na(dataframe$klimald) & dataframe$q2.age >= 53 ~ "postmenopausal",
+                                           is.na(dataframe$klimald) & dataframe$q2.age < 53 ~ "premenopausal"
+                                           ))
+  
+  
+}
+
+df <- findMenopauseStatus.q2(df)
+
+
+categorizeBreastfeeding <- function(dataframe) {
+  dataframe %>%
+    mutate(breastfeedingCategories = case_when(dataframe$amme == 0 ~ 0,
+                                        dataframe$amme > 0 & dataframe$amme <= 12 ~ 1,
+                                        dataframe$amme>12 ~ 2))
+}
+
+df <- categorizeBreastfeeding(df)
+
+
+findHRTStatus <- function(dataframe){
+  dataframe %>%
+    mutate(q1.hrtStatus = case_when(htgroup == 1 ~ 0,
+                                 htgroup == 2 ~ 1,
+                                 htgroup == 3 ~ 2,
+                                 TRUE ~ 0))
+}
+
+df <- findHRTStatus(df)
+
+
+findOCEverUse <- function(dataframe) {
+  dataframe %>% 
+    mutate(q1.ocEverUse = case_when(ppille == 1 ~ 0,
+                                 ppille == 0 ~ 1,
+                                 is.na(ppille) ~ 0))
+}
+
+df <- findOCEverUse(df)
+
+
+categorizeParity <- function(dataframe){
+  dataframe %>%
+    mutate(q1.parityCat = case_when(antbarn == 0 ~ 0,
+                                 antbarn == 1 ~ 1,
+                                 antbarn == 2 ~ 1,
+                                 antbarn > 2 ~ 2))
+}
+
+df <- categorizeParity(df)
+
+
+
+findFamilyHistBC <- function(dataframe){
+  dataframe %>%
+    mutate(familyHistBC = case_when((mor==0 |
+                                       mor == 3 |
+                                       datter == 0 |
+                                       soster == 0 |
+                                       soster ==3) ~ 1,
+                                    (is.na(mor) &
+                                       is.na(datter) &
+                                       is.na(soster)) ~ 0,
+                                    TRUE ~ 0))
+  
+}
+
+df <- findFamilyHistBC(df)
 
 
 # endpoint formatting ----
@@ -1153,7 +1383,11 @@ findLifestyleCancerStatus <- function(dataframe){
 df <- findLifestyleCancerStatus(df)
 
 
+    # formatted for nelson-aalen which needs censoring coded at 0,1
 
+df$lifestyleCancerIncident <- ifelse(df$statusLifestyle == TRUE,
+                                     1,
+                                     0)
 
 
 
