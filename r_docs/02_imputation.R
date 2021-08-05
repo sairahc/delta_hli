@@ -22,7 +22,6 @@ install.packages("missForest")
 install.packages("Hmisc")
 install.packages("mice")
 install.packages("VIM")
-install.packages("rms")
 install.packages("tidyverse")
 install.packages("survival")
 library(missForest)
@@ -45,7 +44,7 @@ calculateChangeVariables <- function(dataframe){
     mutate(changeBMI = dataframe$q2.bmi - dataframe$q1.bmi) %>%
     mutate(changeHeight = dataframe$yhoyde - dataframe$hoyde) %>%
     mutate(changeWeight = dataframe$yvektana - dataframe$vektana) %>%
-    mutate(changeSmokingScore = dataframe$q2.smokingScore - dataframe$q2.smokingScore) %>%
+    mutate(changeSmokingScore = dataframe$q2.smokingScore - dataframe$q1.smokingScore) %>%
     mutate(changeWholegrain = dataframe$q2.gramsWholegrain - dataframe$q1.gramsWholegrain) %>%
     mutate(changeFruit = dataframe$q2.gramsFruit - dataframe$q1.gramsFruit) %>%
     mutate(changeVegetable = dataframe$q2.gramsVegetable - dataframe$q1.gramsVegetable) %>%
@@ -54,20 +53,13 @@ calculateChangeVariables <- function(dataframe){
     mutate(changeProcessedMeat = dataframe$q2.gramsProcessedMeat - dataframe$q1.gramsProcessedMeat) %>%
     mutate(changeEnergyIntake = dataframe$ytotkjoul - dataframe$totkjoul) %>%
     mutate(nelsonAalen = nelsonaalen(dataframe,
-                                     ageExit,
+                                     followUpTimeDays,
                                      lifestyleCancerIncident)) 
     
     
 }
 
 df <- calculateChangeVariables(df)
-
-
-#nelson aalen
-
-
-
-
 
 # Create dataframe with only variables in analysis / predictors of those variables ----
   # include all variables that appear in the complete data model, including the outcome
@@ -116,15 +108,23 @@ selectImputationVars <- function(dataframe){
              mensald,
              q2.menopausalStatus,
              q1.q2.timeDifferenceYears,
+             prePost2000Cohort,
              statusLifestyle
              
       ))
 }
 
-imputationReady <- selectImputationVars(df)   
+imputationReady <- selectImputationVars(df)  
+
+# change variable classes for imputation
+imputationReady$changeSmokingScore <- as.factor(as.character(imputationReady$changeSmokingScore))
+imputationReady$q2.menopausalStatus <- as.factor(imputationReady$q2.menopausalStatus)
+
+ 
 p_missing <- unlist(lapply(imputationReady, function(x) sum(is.na(x))))/nrow(imputationReady)
 sort(p_missing[p_missing > 0], decreasing = TRUE)
 sapply(df, function(x) sum(is.na(x)))
+
 
 
 # imputation ----
@@ -135,11 +135,46 @@ imputeToMids <- function(imputationDataframe){
   predM <- initialise$predictorMatrix
   meth <- initialise$method
   predM[, c("id")] = 0
-  predM[c("nelsonAalen"),] = 0
-  meth["q1.bmi"] <- "~I(vektana/(hoyde/100)^2)" 
-  pred[c("vektana", "hoyde"), "q1.bmi"] <- 0
+  meth["changeSmokingScore"] <- "polr" #proportional odds model
+  meth["q2.menopausalStatus"] <- "logreg"
+  meth["q1.bmi"] <- "~I(vektana/(hoyde/100)^2)" # passive imputation
+  predM[c("vektana", "hoyde"), "q1.bmi"] <- 0 # break the feedback loop that can produce absurd imputations
   imputedMids <- mice(imputationDataframe, method=meth, predictorMatrix = predM, m=20, print=FALSE)
   #TODO make a plot for imputedMids to check convergence
   return(imputedMids)
 }
 
+imputedMids <- imputeToMids(imputationReady)
+
+# check if there are missing left
+
+sapply(complete(imputedMids), function(x) sum(is.na(x)))
+
+# save mids object
+saveRDS(imputedMids, file="C:/Users/sch044/OneDrive - UiT Office 365/R/delta_hli/output/imputedMids_04082021.rds")
+imputedMids <- readRDS(file="C:/Users/sch044/OneDrive - UiT Office 365/R/delta_hli/output/imputedMids_04082021.rds")
+
+
+# diagnostics ----
+
+# convert to complete long dataset
+
+imputedLong <- complete(imputedMids, "long", include=FALSE)
+
+# compare variable descriptives between observed and imputed
+summary(imputedLong$aktidag)
+summary(df$aktidag)
+
+
+summary(imputedLong$q1.bmi)
+summary(df$q1.bmi)
+
+summary(imputedLong$alkogr)
+summary(df$alkogr)
+
+
+summary(imputedLong$q1.smokingScore)
+summary(df$q1.smokingScore)
+
+summary(as.numeric(imputedLong$changeSmokingScore))
+summary(df$changeSmokingScore)

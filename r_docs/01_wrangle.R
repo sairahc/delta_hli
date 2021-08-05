@@ -44,9 +44,14 @@ df$dateBirth <- as.Date(paste0("010719", df$faar),"%d%m%Y")
 df$q1.date <- as.Date(df$startdat, format="%d/%m/%Y")
 df$q2.date <- as.Date(df$ystartdat, format="%d/%m/%Y")
 df$q2.year <- as.numeric(substr(df$ystartdat,7,10)) # calendar year of Q2
-df$prePost2000Cohort <- ifelse(df$q1.date > as.Date("01/01/1998", format="%d/%m/%Y"),
-                               1,
-                               0)
+df$prePost2000Cohort <- as.factor(as.character(ifelse(df$q1.date > as.Date("31/12/1999", format="%d/%m/%Y"),
+                               1, # 2000s
+                               0  # 1900s
+                               )))
+df$birthCohort10Year <- case_when(df$faar>= 27 & df$faar <39 ~ "30s",
+                                  df$faar>= 40 & df$faar<49 ~ "40s",
+                                  df$faar>= 50 & df$faar<59 ~ "50s"
+                                  )
 
 # find age at Q1 and Q2
 df$q1.age <- as.numeric((df$q1.date - df$dateBirth)/365.25)
@@ -1388,7 +1393,7 @@ df <- findLifestyleCancerStatus(df)
 df$lifestyleCancerIncident <- ifelse(df$statusLifestyle == TRUE,
                                      1,
                                      0)
-
+ 
 
 
 
@@ -1396,4 +1401,4 @@ df$lifestyleCancerIncident <- ifelse(df$statusLifestyle == TRUE,
 
 # create dataframe with only complete cases
 
-df <- df[!is.na(df$q1.hli) & !is.na(df$q2.hli),]
+#     df <- df[!is.na(df$q1.hli) & !is.na(df$q2.hli),]
